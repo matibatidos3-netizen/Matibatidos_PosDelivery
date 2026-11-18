@@ -1,0 +1,126 @@
+name: Construir APK Matibatidos RC6
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+      - principal
+    paths:
+      - 'Matibatidos_RC6_EXCEL_RENDIMIENTO_CORREGIDO.zip'
+      - '.github/workflows/build-apk.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Compilar APK RC6
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Verificar archivo del proyecto
+        shell: bash
+        run: |
+          ZIP="Matibatidos_RC6_EXCEL_RENDIMIENTO_CORREGIDO.zip"
+
+          if [ ! -f "$ZIP" ]; then
+            echo "::error::No se encontró $ZIP en la raíz del repositorio."
+            exit 1
+          fi
+
+          echo "ZIP encontrado correctamente."
+
+      - name: Extraer proyecto RC6
+        shell: bash
+        run: |
+          mkdir -p extracted
+          unzip -q Matibatidos_RC6_EXCEL_RENDIMIENTO_CORREGIDO.zip -d extracted
+
+          PROJECT_DIR="$(find extracted -type f -path '*/app/build.gradle' -print -quit | sed 's#/app/build.gradle##')"
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "::error::No se encontró app/build.gradle dentro del ZIP."
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Proyecto localizado en: $PROJECT_DIR"
+
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Instalar componentes Android
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Verificar configuración del proyecto
+        shell: bash
+        run: |
+          if [ ! -f "$PROJECT_DIR/app/build.gradle" ]; then
+            echo "::error::Falta app/build.gradle."
+            exit 1
+          fi
+
+          if [ ! -f "$PROJECT_DIR/settings.gradle" ] && [ ! -f "$PROJECT_DIR/settings.gradle.kts" ]; then
+            echo "::error::No se encontró settings.gradle."
+            exit 1
+          fi
+
+          echo "Estructura del proyecto verificada."
+
+      - name: Configurar Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Compilar APK
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew --no-daemon assembleDebug
+          else
+            gradle --no-daemon assembleDebug
+          fi
+
+      - name: Verificar APK generada
+        shell: bash
+        run: |
+          APK="$(find "$PROJECT_DIR/app/build/outputs/apk/debug" -type f -name '*.apk' -print -quit)"
+
+          if [ -z "$APK" ]; then
+            echo "::error::La compilación terminó, pero no se encontró la APK."
+            exit 1
+          fi
+
+          mkdir -p release
+          cp "$APK" release/Matibatidos-RC6-debug.apk
+
+          echo "APK generada correctamente."
+          ls -lh release/
+
+      - name: Publicar APK descargable
+        uses: actions/upload-artifact@v4
+        with:
+          name: Matibatidos-RC6-APK
+          path: release/Matibatidos-RC6-debug.apk
+          if-no-files-found: error
+          retention-days: 14
