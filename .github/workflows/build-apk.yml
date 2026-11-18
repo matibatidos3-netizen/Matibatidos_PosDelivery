@@ -1,4 +1,4 @@
-name: Compilador APK RC6
+name: Compilador APK Matibatidos RC6
 
 on:
   workflow_dispatch:
@@ -14,14 +14,14 @@ permissions:
 
 jobs:
   build:
-    name: Compilar APK Matibatidos RC6
+    name: Compilar APK RC6
     runs-on: ubuntu-latest
 
     steps:
       - name: Descargar repositorio
         uses: actions/checkout@v4
 
-      - name: Localizar archivo ZIP RC6
+      - name: Localizar ZIP del proyecto
         id: locate
         shell: bash
         run: |
@@ -30,16 +30,14 @@ jobs:
             -printf '%T@ %p\n' | sort -nr | head -n 1 | cut -d' ' -f2-)
 
           if [ -z "$ZIP_PATH" ]; then
-            echo "::error::No se encontró el ZIP RC6 en la raíz del repositorio."
-            echo "Archivos ZIP disponibles:"
-            find . -maxdepth 1 -type f -iname '*.zip'
+            echo "::error::No se encontró el ZIP RC6 en la raíz."
             exit 1
           fi
 
-          echo "ZIP encontrado: $ZIP_PATH"
+          echo "Archivo encontrado: $ZIP_PATH"
           echo "zip_path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
 
-      - name: Extraer proyecto RC6
+      - name: Extraer proyecto
         id: extract
         shell: bash
         run: |
@@ -51,7 +49,7 @@ jobs:
             -print -quit)
 
           if [ -z "$APP_GRADLE" ]; then
-            echo "::error::No se encontró app/build.gradle dentro del ZIP."
+            echo "::error::No se encontró app/build.gradle."
             exit 1
           fi
 
@@ -59,11 +57,11 @@ jobs:
 
           if [ ! -f "$PROJECT_DIR/settings.gradle" ] && \
              [ ! -f "$PROJECT_DIR/settings.gradle.kts" ]; then
-            echo "::error::No se encontró settings.gradle en el proyecto."
+            echo "::error::No se encontró settings.gradle."
             exit 1
           fi
 
-          echo "Proyecto localizado: $PROJECT_DIR"
+          echo "Proyecto: $PROJECT_DIR"
           echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
       - name: Configurar Java 17
@@ -72,14 +70,44 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Configurar Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Localizar Android SDK
+        id: android
+        shell: bash
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+
+          if [ ! -d "$SDK" ]; then
+            echo "::error::No se encontró Android SDK."
+            exit 1
+          fi
+
+          SDKMANAGER=$(find "$SDK/cmdline-tools" \
+            -type f -name sdkmanager 2>/dev/null | head -n 1)
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "::error::No se encontró sdkmanager."
+            exit 1
+          fi
+
+          echo "SDK encontrado: $SDK"
+          echo "sdkmanager encontrado: $SDKMANAGER"
+
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "$SDK/platform-tools" >> "$GITHUB_PATH"
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          echo "sdkmanager=$SDKMANAGER" >> "$GITHUB_OUTPUT"
 
       - name: Instalar componentes Android
         shell: bash
         run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager \
+          SDKMANAGER="${{ steps.android.outputs.sdkmanager }}"
+
+          yes | "$SDKMANAGER" \
+            --sdk_root="$ANDROID_HOME" --licenses || true
+
+          "$SDKMANAGER" \
+            --sdk_root="$ANDROID_HOME" \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
@@ -89,20 +117,21 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Verificar proyecto Android
+      - name: Verificar configuración RC6
         shell: bash
         run: |
           PROJECT_DIR="${{ steps.extract.outputs.project_dir }}"
 
-          echo "Revisando configuración..."
-
+          echo "Application ID:"
           grep -n "applicationId" "$PROJECT_DIR/app/build.gradle" || true
+
+          echo "Version Code:"
           grep -n "versionCode" "$PROJECT_DIR/app/build.gradle" || true
+
+          echo "Version Name:"
           grep -n "versionName" "$PROJECT_DIR/app/build.gradle" || true
 
-          echo "Verificación completada."
-
-      - name: Compilar APK RC6
+      - name: Compilar APK
         shell: bash
         run: |
           PROJECT_DIR="${{ steps.extract.outputs.project_dir }}"
@@ -110,8 +139,7 @@ jobs:
 
           gradle --no-daemon --stacktrace assembleDebug
 
-      - name: Verificar APK generada
-        id: apk
+      - name: Verificar APK
         shell: bash
         run: |
           PROJECT_DIR="${{ steps.extract.outputs.project_dir }}"
@@ -120,17 +148,18 @@ jobs:
             -type f -name '*.apk' -print -quit)
 
           if [ -z "$APK" ]; then
-            echo "::error::No se encontró la APK después de compilar."
+            echo "::error::No se generó la APK."
             exit 1
           fi
 
           mkdir -p "$GITHUB_WORKSPACE/release"
-          cp "$APK" "$GITHUB_WORKSPACE/release/Matibatidos-RC6-debug.apk"
 
-          echo "APK generada:"
-          ls -lh "$GITHUB_WORKSPACE/release/Matibatidos-RC6-debug.apk"
+          cp "$APK" \
+            "$GITHUB_WORKSPACE/release/Matibatidos-RC6-debug.apk"
 
-      - name: Publicar APK descargable
+          ls -lh "$GITHUB_WORKSPACE/release/"
+
+      - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
           name: Matibatidos-RC6-APK
